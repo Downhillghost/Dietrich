@@ -1,0 +1,4 @@
+kaitaistruct>=0.11
+matplotlib>=3.7
+numpy>=1.24
+PyMuPDF>=1.23
