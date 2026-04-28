@@ -99,7 +99,7 @@ types:
             1: stroke_subrecord
             3: image_own_subrecord
             6: image_layout_subrecord
-            7: shape_image_subrecord
+            7: shape_subrecord
         size: size - 6
   stroke_subrecord:
     seq:
@@ -140,7 +140,7 @@ types:
         type: u4
       - id: extra
         size-eos: true
-  shape_image_subrecord:
+  shape_subrecord:
     seq:
       - id: own_offset
         type: u4
@@ -154,6 +154,19 @@ types:
         type: rect_f64
       - id: extra
         size-eos: true
+    instances:
+      text_common_size_offset:
+        value: own_offset - 6
+      has_text_common:
+        value: shape_type == 4 and (shape_property_mask & 1) != 0 and text_common_size_offset >= 0 and text_common_size_offset + 4 <= _io.size
+      text_common_size:
+        pos: text_common_size_offset
+        type: u4
+        if: has_text_common
+      text_common:
+        pos: text_common_size_offset + 4
+        size: text_common_size
+        if: has_text_common and text_common_size <= _io.size - text_common_size_offset - 4
   image_own_subrecord:
     seq:
       - id: flexible_payload_present

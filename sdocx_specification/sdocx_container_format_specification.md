@@ -5,8 +5,12 @@ This document describes the high-level container structure of Samsung Notes
 
 ## 1. Overview
 
-A `.sdocx` file is a ZIP archive. After extraction, the note content is stored
-as a note root directory containing:
+A `.sdocx` file is a ZIP archive. Samsung-compatible packages can keep the
+document end-tag bytes after the ZIP end record; Dietrich-generated packages
+write the same payload both as `end_tag.bin` inside the archive and as this
+trailing compatibility footer. After extraction, the note content is represented
+as a note root directory, either at the archive root or in a single child
+directory, containing:
 
 ```text
 <note-root>/
@@ -53,6 +57,9 @@ Important points:
 
 - the filename stem is the page UUID
 - `pageIdInfo.dat` defines the intended page order
+- Samsung-compatible exports include a trailing blank page for import
+  compatibility; consumers may treat it as a placeholder when it has no
+  strokes, text fields, images, backgrounds, or other visible content
 
 ## 4. Media Directory
 
@@ -71,6 +78,10 @@ The bind id is authoritative. The filename usually starts with the same bind id,
 but parsers should resolve media through `mediaInfo.dat` rather than relying on
 filename text alone.
 
+For generated packages, Dietrich writes image assets as `media/<bind-id>@<name>`
+entries and emits matching `mediaInfo.dat` rows with SHA-256 hex hashes,
+reference count `1`, and `isFileAttached = 1`.
+
 ## 5. Practical Resolution Rules
 
 These rules are reliable:
@@ -87,3 +98,25 @@ These rules are reliable:
 
 Rendered preview folders are not part of the `.sdocx` container format. They
 are local export artifacts and should not be treated as authoritative note data.
+
+## 7. Dietrich Writer Profile
+
+Dietrich-generated `.sdocx` packages currently contain:
+
+- `note.note`
+- `pageIdInfo.dat`
+- `end_tag.bin`
+- `media/mediaInfo.dat`
+- one `.page` file per exported note surface
+- media files for resolved image assets
+- one trailing blank `.page` file
+
+Supported written page objects:
+
+- handwriting and shape outlines as stroke objects
+- neutral text as native Samsung Notes text-field objects
+- neutral image assets as native Samsung Notes image objects
+- neutral frames as a stroke-outline rectangle plus a heading text field
+
+Unsupported neutral elements are omitted with export warnings rather than being
+silently converted to unrelated Samsung objects.

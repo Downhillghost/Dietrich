@@ -11,6 +11,7 @@ from matplotlib.font_manager import FontProperties
 from matplotlib.patches import Rectangle
 
 from note_pipeline.model import (
+    FrameElement,
     ImageElement,
     IntRect,
     NoteDocument,
@@ -26,6 +27,7 @@ DEFAULT_TEXT_COLOR = 0xFF252525
 DEFAULT_TEXT_SIZE = 17.0
 DEFAULT_TEXT_FONT = "DejaVu Sans"
 DEFAULT_THICKNESS_SCALE = 0.6
+DEFAULT_FRAME_LABEL_SIZE = 32.0
 
 _PDF_PAGE_CACHE: Dict[Tuple[str, int, int, int, Tuple[str, ...]], Optional[object]] = {}
 _PDF_RENDER_WARNING_EMITTED = False
@@ -494,7 +496,7 @@ def compute_surface_bounds(surface) -> Tuple[float, float, float, float]:
                 min_y = y if min_y is None else min(min_y, y)
                 max_x = x if max_x is None else max(max_x, x)
                 max_y = y if max_y is None else max(max_y, y)
-        elif isinstance(element, (ImageElement, PdfBackgroundElement)):
+        elif isinstance(element, (FrameElement, ImageElement, PdfBackgroundElement)):
             add_rect(element.rect)
         elif isinstance(element, TextElement):
             add_rect(
@@ -740,14 +742,19 @@ def render_surface_to_png(
         for element in surface.elements
         if isinstance(element, ImageElement) and _asset_path(note, element.asset_id) is not None
     ]
+    valid_frames = [
+        element
+        for element in surface.elements
+        if isinstance(element, FrameElement)
+    ]
     valid_text = [
         element
         for element in surface.elements
         if isinstance(element, TextElement) and element.text
     ]
 
-    if not valid_backgrounds and not valid_strokes and not valid_images and not valid_text:
-        print("No meaningful backgrounds, strokes, images, or text found.")
+    if not valid_backgrounds and not valid_strokes and not valid_images and not valid_text and not valid_frames:
+        print("No meaningful backgrounds, strokes, images, frames, or text found.")
         return 0
 
     min_x, min_y, max_x, max_y = compute_surface_bounds(surface)
@@ -765,7 +772,7 @@ def render_surface_to_png(
 
     rendered_backgrounds: List[PdfBackgroundElement] = []
     renderable_elements = sorted(
-        [*valid_backgrounds, *valid_text, *valid_images, *valid_strokes],
+        [*valid_backgrounds, *valid_frames, *valid_text, *valid_images, *valid_strokes],
         key=_element_sort_key,
     )
     for element in renderable_elements:
@@ -795,6 +802,33 @@ def render_surface_to_png(
 
         if isinstance(element, TextElement):
             _draw_text_element(ax, element, zorder)
+            continue
+
+        if isinstance(element, FrameElement):
+            left, top, right, bottom = element.rect
+            ax.add_patch(
+                Rectangle(
+                    (left, top),
+                    right - left,
+                    bottom - top,
+                    fill=False,
+                    edgecolor=element.rgba,
+                    linewidth=max(0.5, float(element.stroke_width) * thickness_scale),
+                    zorder=zorder,
+                )
+            )
+            if element.name:
+                label_size = max(1.0, float(element.label_font_size_pt or DEFAULT_FRAME_LABEL_SIZE))
+                ax.text(
+                    left,
+                    top - 10.0,
+                    str(element.name),
+                    color=element.rgba,
+                    fontsize=label_size,
+                    va="bottom",
+                    ha="left",
+                    zorder=zorder + 0.1,
+                )
             continue
 
         if isinstance(element, ImageElement):

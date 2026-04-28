@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 
 from note_pipeline.model import (
     ExportResult,
+    FrameElement,
     ImageElement,
     NoteDocument,
     PdfBackgroundElement,
@@ -155,19 +156,35 @@ class ExcalidrawExporter(NoteExporter):
             else:
                 page_offset = (float(surface.origin_x), float(surface.origin_y))
 
-            page_text_elements: List[TextElement] = []
+            neutral_frame_ids = {
+                child_id: frame.element_id
+                for frame in surface.elements
+                if isinstance(frame, FrameElement)
+                for child_id in frame.child_element_ids
+            }
 
+            page_text_elements: List[TextElement] = []
             for element in surface.elements:
                 if isinstance(element, UnsupportedElement):
                     warnings.append(f"Omitted unsupported element {element.unsupported_type} on surface {surface.surface_id}.")
                     continue
                 if isinstance(element, TextElement):
-                    page_text_elements.append(element)
+                    if self._is_page_text_segment(element):
+                        page_text_elements.append(element)
+                        continue
+                    excalidraw_text = self._export_text_element(page_offset, element)
+                    if frame_id is not None:
+                        excalidraw_text["frameId"] = frame_id
+                    elif element.element_id in neutral_frame_ids:
+                        excalidraw_text["frameId"] = neutral_frame_ids[element.element_id]
+                    elements.append(excalidraw_text)
                     continue
                 excalidraw_element = self._export_element(note, page_offset, element, files)
                 if excalidraw_element is not None:
                     if frame_id is not None:
                         excalidraw_element["frameId"] = frame_id
+                    elif element.element_id in neutral_frame_ids:
+                        excalidraw_element["frameId"] = neutral_frame_ids[element.element_id]
                     elements.append(excalidraw_element)
 
             page_text = self._export_page_text(page_offset, surface.surface_id, page_text_elements)
@@ -261,6 +278,21 @@ class ExcalidrawExporter(NoteExporter):
                         for element in surface.elements
                         if isinstance(element, UnsupportedElement)
                     ],
+                    "frameElements": [
+                        {
+                            "elementId": element.element_id,
+                            "name": element.name,
+                            "rect": _json_safe(element.rect),
+                            "labelFontSizePt": element.label_font_size_pt,
+                            "childElementIds": list(element.child_element_ids),
+                            "layerNumber": element.layer_number,
+                            "sourceOrder": element.source_order,
+                            "zIndex": element.z_index,
+                            "vendorExtensions": _json_safe(element.vendor_extensions),
+                        }
+                        for element in surface.elements
+                        if isinstance(element, FrameElement)
+                    ],
                 }
                 for surface in note.surfaces
             ],
@@ -275,11 +307,30 @@ class ExcalidrawExporter(NoteExporter):
     ) -> Optional[Dict[str, object]]:
         if isinstance(element, PdfBackgroundElement):
             return self._export_pdf_background(note, page_offset, element, files)
+        if isinstance(element, FrameElement):
+            return self._export_frame(page_offset, element)
         if isinstance(element, ImageElement):
             return self._export_image(note, page_offset, element, files)
         if isinstance(element, StrokeElement):
             return self._export_stroke(page_offset, element)
         return None
+
+    def _export_frame(self, page_offset: Tuple[float, float], element: FrameElement) -> Dict[str, object]:
+        left, top, right, bottom = element.rect
+        x_offset, y_offset = page_offset
+        excalidraw_element = _base_element(
+            element.element_id,
+            "frame",
+            x_offset + left,
+            y_offset + top,
+            right - left,
+            bottom - top,
+        )
+        excalidraw_element["name"] = element.name or ""
+        excalidraw_element["strokeColor"] = _rgba_to_hex(element.rgba)
+        excalidraw_element["strokeWidth"] = max(1, int(round(float(element.stroke_width))))
+        excalidraw_element["zIndex"] = element.z_index
+        return excalidraw_element
 
     def _register_file(self, file_id: str, data_url: str) -> Dict[str, object]:
         return {
@@ -398,6 +449,49 @@ class ExcalidrawExporter(NoteExporter):
         excalidraw_element["simulatePressure"] = False
         excalidraw_element["lastCommittedPoint"] = points[-1]
         excalidraw_element["zIndex"] = element.z_index
+        return excalidraw_element
+
+    def _is_page_text_segment(self, element: TextElement) -> bool:
+        samsung_notes = element.vendor_extensions.get("samsung_notes")
+        if not isinstance(samsung_notes, dict):
+            return False
+        return not any(key in samsung_notes for key in ("object_start", "subrecord_start", "text_common", "rect"))
+
+    def _export_text_element(
+        self,
+        page_offset: Tuple[float, float],
+        element: TextElement,
+    ) -> Dict[str, object]:
+        x_offset, y_offset = page_offset
+        top = float(element.baseline_y - element.ascent)
+        width = max(1.0, float(element.width))
+        height = max(1.0, float(element.ascent + element.descent))
+        text = str(element.text or "")
+        excalidraw_element = _base_element(
+            element.element_id,
+            "text",
+            x_offset + float(element.x),
+            y_offset + top,
+            width,
+            height,
+        )
+        excalidraw_element["strokeColor"] = _argb_to_hex(int(element.color_int))
+        excalidraw_element["backgroundColor"] = (
+            _argb_to_hex(int(element.background_color_int))
+            if isinstance(element.background_color_int, int)
+            else "transparent"
+        )
+        excalidraw_element["opacity"] = _opacity_from_argb(int(element.color_int))
+        excalidraw_element["text"] = text
+        excalidraw_element["originalText"] = text
+        excalidraw_element["fontSize"] = int(round(float(element.font_size_pt or raster.DEFAULT_TEXT_SIZE)))
+        excalidraw_element["fontFamily"] = 3 if element.font_name else 1
+        excalidraw_element["textAlign"] = "left"
+        excalidraw_element["verticalAlign"] = "top"
+        excalidraw_element["containerId"] = None
+        excalidraw_element["lineHeight"] = 1.25
+        excalidraw_element["autoResize"] = False
+        excalidraw_element["zIndex"] = int(element.z_index)
         return excalidraw_element
 
     def _export_page_text(

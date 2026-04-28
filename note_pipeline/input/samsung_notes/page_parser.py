@@ -22,7 +22,8 @@ from note_pipeline.input.binary import (
     u64,
 )
 from note_pipeline.input.samsung_notes.constants import IMAGE_LAYOUT_USE_DEFAULT
-from note_pipeline.input.samsung_notes.generated import SamsungPage, SamsungPageLayers
+from note_pipeline.input.samsung_notes.generated import SamsungPage, SamsungPageLayers, SamsungTextCommon
+from note_pipeline.input.samsung_notes.note_adapters import text_common_to_dict
 from note_pipeline.input.samsung_notes.sidecars import parse_media_info
 from note_pipeline.input.samsung_notes.spi import parse_spi_file
 from note_pipeline.model import IntRect, Point, Rect
@@ -227,15 +228,31 @@ class SpenNotesPageParser:
         if point_count < 0:
             return None
 
+        axis_bytes = point_count * 4 * (2 if has_optional_axes else 0)
+        raw_f32_size = (point_count * 8) + (point_count * 4) + (point_count * 4) + axis_bytes + 2
+        raw_f64_size = (point_count * 16) + (point_count * 4) + (point_count * 4) + axis_bytes + 2
+        available = limit - cursor
+        if available == raw_f32_size:
+            point_coord_size = 4
+            point_encoding = "raw_f32"
+        elif available == raw_f64_size:
+            point_coord_size = 8
+            point_encoding = "raw_f64"
+        else:
+            return None
+
         points: List[Point] = []
         if point_count > 0:
-            point_bytes = point_count * 16
+            point_bytes = point_count * point_coord_size * 2
             if cursor + point_bytes > limit or not self._can_read(cursor, point_bytes):
                 return None
 
             for point_index in range(point_count):
-                point_offset = cursor + (point_index * 16)
-                points.append((self._f64(point_offset), self._f64(point_offset + 8)))
+                point_offset = cursor + (point_index * point_coord_size * 2)
+                if point_coord_size == 4:
+                    points.append((self._f32(point_offset), self._f32(point_offset + 4)))
+                else:
+                    points.append((self._f64(point_offset), self._f64(point_offset + 8)))
             cursor += point_bytes
 
         parsed_pressures = self._parse_raw_float_series(cursor, limit, point_count)
@@ -271,6 +288,7 @@ class SpenNotesPageParser:
             "timestamps": timestamps,
             "tilts": tilts,
             "orientations": orientations,
+            "point_encoding": point_encoding,
             "pressure_encoding": "raw_f32",
             "timestamp_encoding": "raw_s32",
             "tilt_encoding": "raw_f32" if has_optional_axes else None,
@@ -575,19 +593,22 @@ class SpenNotesPageParser:
             return None
         point_count = self._u16(cursor)
         cursor += 2
+        geometry_limit = start + flexible_offset
+        if geometry_limit < cursor or geometry_limit > end:
+            geometry_limit = end
 
         geometry: Optional[Tuple[List[Point], Dict[str, object], int, int]]
         if property_mask1 & 0x0001:
             geometry = self._parse_new_stroke_compact_geometry(
                 cursor,
-                end,
+                geometry_limit,
                 point_count,
                 bool(property_mask1 & 0x0004),
             )
         else:
             geometry = self._parse_new_stroke_raw_geometry(
                 cursor,
-                end,
+                geometry_limit,
                 point_count,
                 bool(property_mask1 & 0x0004),
             )
@@ -1549,6 +1570,105 @@ class SpenNotesPageParser:
 
         return image_records
 
+    def _parse_text_field_object(
+        self,
+        layer: Dict[str, object],
+        obj: Dict[str, object],
+    ) -> Optional[Dict[str, object]]:
+        if int(obj.get("object_type") or 0) != 2:
+            return None
+
+        shape_subrecord = next((record for record in obj.get("subrecords", []) if record["type"] == 7), None)
+        if shape_subrecord is None:
+            return None
+
+        start = int(shape_subrecord["start"])
+        end = int(shape_subrecord["end"])
+        if start + 53 > end:
+            return None
+
+        body = shape_subrecord.get("body")
+        if body is not None and hasattr(body, "shape_type"):
+            own_offset = int(body.own_offset)
+            shape_property_mask = int(body.shape_property_mask)
+            shape_type = int(body.shape_type)
+            rect = self._rect_from_generated(body.original_rect)
+        else:
+            own_offset = self._u32(start + 6) if self._can_read(start + 6, 4) else 0
+            shape_property_mask = self._u32(start + 13) if self._can_read(start + 13, 4) else 0
+            shape_type = self._u32(start + 17) if self._can_read(start + 17, 4) else 0
+            rect = self._rectd(start + 21)
+        if own_offset <= 0 or start + own_offset + 4 > end:
+            return None
+        if (shape_property_mask & 0x1) == 0 or shape_type != 4:
+            return None
+
+        text_common_bytes: Optional[bytes] = None
+        text_common_size: Optional[int] = None
+        if body is not None and hasattr(type(body), "text_common"):
+            try:
+                raw_text_common = body.text_common
+            except Exception:
+                raw_text_common = None
+            if raw_text_common is not None:
+                text_common_bytes = bytes(raw_text_common)
+                try:
+                    text_common_size = int(body.text_common_size)
+                except Exception:
+                    text_common_size = len(text_common_bytes)
+
+        if text_common_bytes is None:
+            text_common_size = self._u32(start + own_offset)
+            text_common_start = start + own_offset + 4
+            text_common_end = text_common_start + text_common_size
+            if text_common_size <= 0 or text_common_end > end:
+                return None
+            text_common_bytes = self.data[text_common_start:text_common_end]
+
+        stream = KaitaiStream(BytesIO(text_common_bytes))
+        try:
+            parsed = SamsungTextCommon(int(self.extract_page_metadata().get("format_version") or 4000), stream)
+        except Exception:
+            return None
+        if stream.pos() != stream.size():
+            return None
+
+        text_common = text_common_to_dict(parsed)
+        if text_common is None or not str(text_common.get("text") or ""):
+            return None
+
+        spans = list(text_common.get("spans", []))
+        font_size = next((float(span["value"]) for span in spans if span.get("type") == 3 and isinstance(span.get("value"), (int, float))), None)
+        color_int = next((int(span["value"]) for span in spans if span.get("type") == 1 and isinstance(span.get("value"), int)), None)
+        margins = tuple(float(value) for value in text_common.get("margins", (0.0, 0.0, 0.0, 0.0)))
+
+        return {
+            "object_start": obj.get("start"),
+            "object_end": obj.get("record_end"),
+            "subrecord_start": start,
+            "subrecord_end": end,
+            "layer_number": layer["layer_number"],
+            "rect": rect,
+            "shape_type": shape_type,
+            "shape_property_mask": shape_property_mask,
+            "own_offset": own_offset,
+            "text_common_size": text_common_size,
+            "text_common": text_common,
+            "text": str(text_common.get("text") or ""),
+            "font_size": font_size,
+            "color_int": color_int,
+            "margins": margins,
+        }
+
+    def extract_text_field_records(self) -> List[Dict[str, object]]:
+        text_records: List[Dict[str, object]] = []
+        for layer in self._parse_layers():
+            for obj in self._iter_flat_objects(layer["objects"]):
+                record = self._parse_text_field_object(layer, obj)
+                if record is not None:
+                    text_records.append(record)
+        return text_records
+
     def extract_background_records(self) -> List[Dict[str, object]]:
         metadata = self.extract_page_metadata()
         pdf_data_list = list(metadata.get("pdf_data_list") or [])
@@ -1938,19 +2058,22 @@ class SpenNotesPageParser:
         property_mask2 = int.from_bytes(property_mask2_bytes, "little", signed=False)
         point_count = int(generated_body.point_count)
         cursor = start + 6 + 4 + 1 + len(property_mask1_bytes) + 1 + len(property_mask2_bytes) + 2
+        geometry_limit = start + flexible_offset
+        if geometry_limit < cursor or geometry_limit > end:
+            geometry_limit = end
 
         geometry: Optional[Tuple[List[Point], Dict[str, object], int, int]]
         if property_mask1 & 0x0001:
             geometry = self._parse_new_stroke_compact_geometry(
                 cursor,
-                end,
+                geometry_limit,
                 point_count,
                 bool(property_mask1 & 0x0004),
             )
         else:
             geometry = self._parse_new_stroke_raw_geometry(
                 cursor,
-                end,
+                geometry_limit,
                 point_count,
                 bool(property_mask1 & 0x0004),
             )

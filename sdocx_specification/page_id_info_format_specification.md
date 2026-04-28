@@ -67,6 +67,13 @@ Reliable behavior:
 4. if a listed page file is missing, skip it and continue
 5. if `pageIdInfo.dat` itself is missing, fall back to filename ordering
 
+## 6.1 Dietrich Writer Behavior
+
+Dietrich writes page entries in exported page order and includes the trailing
+blank compatibility page. The file-level hash/check block is derived from the
+generated `note.note` hash, and each page entry carries the hash/check block
+from the corresponding generated `.page` file.
+
 ## 7. Example Interpretation
 
 If the entry list is:

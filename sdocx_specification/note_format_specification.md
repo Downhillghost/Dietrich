@@ -104,6 +104,25 @@ For supported text notes:
 - `pageHorizontalPadding = 0`
 - `pageVerticalPadding = 21`
 
+### Dietrich Writer Pattern
+
+Dietrich-generated `note.note` files use:
+
+- `formatVersion = 4000`
+- `minFormatVersion = 4000`
+- `header_flags = 0x00000008`
+- `property_flags = 0x000C8E80`
+- `width = max(page widths)`
+- `height = sum(page heights) + 8`
+- `pageHorizontalPadding = 0`
+- `pageVerticalPadding = 8`
+- a title object built from the neutral note title
+- an empty body object
+- a string-id block containing the default fountain pen name and advanced
+  setting used by generated stroke objects
+- current pen info and fixed text/background fields compatible with generated
+  pages
+
 ## 4. String Encodings Used by `note.note`
 
 Known string encodings:

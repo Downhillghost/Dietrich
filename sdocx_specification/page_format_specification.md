@@ -401,6 +401,22 @@ parser first reads the stable subrecord frame (`subrecord_size`,
 geometry, shape fill effects, image layout, and image-own flexible fields in
 normal Python code.
 
+### Base-Object Subrecord Page Dimensions
+
+Supported stroke base-object subrecords store the trailing embedded page
+dimensions as `pageWidth * 256` and `pageHeight * 256`, not as the raw page
+metadata dimensions. For example, a `720 x 1018` page stores
+`184320 x 260608`, and a `1440 x 2036` page stores `368640 x 521216`.
+
+Supported text-field base-object subrecords differ from stroke objects here:
+they store the raw page dimensions. For example, a `961 x 1360` page stores
+`961 x 1360`. The same tail also uses a different byte layout: after the
+object rectangle and a `u32(0)` field, supported text fields have one `0x00`
+spacer byte, then the second timestamp, then raw `pageWidth` and `pageHeight`
+through the end of the 121-byte base-object subrecord. Stroke base-object
+subrecords instead put that final spacer byte after the embedded page
+dimensions.
+
 For an observed inserted-image object, the payload contains:
 
 1. type `0` base-object subrecord
@@ -413,6 +429,67 @@ The image object itself starts at `0x014D`:
 - `object_type = 3`
 - `child_count = 0`
 - `object_size = 0x01F8`
+
+### Text-Field Objects
+
+Supported Samsung Notes text fields are layer objects with:
+
+- `object_type = 2`
+- type `0` base-object subrecord
+- type `6` shape-base subrecord
+- type `7` shape/text subrecord
+- trailing type `2` subrecord
+
+The type-`7` shape/text subrecord uses `shape_type = 4` and
+`shape_property_mask = 0x2001`. Its `ownOffset` points to a length-prefixed
+`TextCommon` payload followed by a single trailing byte `0x02`. The supported
+`TextCommon` payload uses ordinary font-size and foreground-color spans,
+paragraph records for alignment and parsing state, margins `(8, 4, 8, 4)`, and
+no object references.
+
+Supported inserted text fields keep a generous object rectangle around the text.
+Both reference boxes use a width of about `320.33` and a height of `108`, even
+for short text.
+
+### Dietrich-Generated Text Fields
+
+Dietrich writes neutral `TextElement` instances as native Samsung text-field
+objects:
+
+- object type `2`
+- type `0` base-object subrecord with raw page width/height in the tail
+- type `6` shape-base subrecord
+- type `7` shape/text subrecord with `shape_type = 4`
+- trailing type `2` subrecord
+
+The text payload is encoded as UTF-16LE `TextCommon` data with:
+
+- font-size span (`type = 3`)
+- foreground-color span (`type = 1`)
+- paragraph alignment record (`type = 3`)
+- paragraph parsing-state record (`type = 6`)
+- margins `(8, 4, 8, 4)`
+
+Text strings are normalized before UTF-16LE encoding, so Unicode characters from
+JSON or markdown sources can be written safely.
+
+Samsung Notes text fields require more vertical room than the neutral text
+geometry alone. Dietrich therefore applies an output-only vertical field scale
+when computing the object rectangle. This keeps the neutral model independent of
+Samsung-specific layout padding while giving Samsung Notes enough space to show
+larger fonts and frame headings.
+
+### Dietrich-Generated Frame Labels
+
+Samsung Notes export maps neutral `FrameElement` objects to two ordinary page
+objects:
+
+1. a stroke object containing the frame outline
+2. a text-field object containing the frame heading above the outline
+
+The frame heading text field uses a Samsung-specific minimum width and height,
+and its rectangle is positioned so the bottom edge stays just above the frame
+outline.
 
 ---
 
@@ -613,6 +690,25 @@ Inserted images use `fillImageEffect.imageId` for the primary bitmap reference, 
 
 But for faithful rendering, also check the trailing image-own subrecord for optional display metadata such as `cropRect`.
 
+### Dietrich-Generated Image Objects
+
+Dietrich writes neutral `ImageElement` instances as native Samsung image objects:
+
+- object type `3`
+- type `0` base-object subrecord
+- type `6` image layout subrecord
+- type `7` shape subrecord with a fill-image effect
+- trailing type `3` image-own subrecord
+
+The primary bitmap is stored in the `media/` directory and registered in
+`media/mediaInfo.dat`. The page object references it through
+`fillImageEffect.imageId`, which stores the numeric media bind id. Generated
+image objects use layout type `2` and alpha `255`.
+
+Crop metadata is preserved in the neutral model when it is present on import.
+Current Samsung Notes export writes the displayed image rectangle and media
+reference; optional advanced image styling remains target-specific metadata.
+
 ---
 
 ## 9. Stroke Object Binary
@@ -701,11 +797,15 @@ stroke width/material algorithm is still not fully specified.
 
 #### Raw geometry (`propertyMask1 & 0x0001 == 0`)
 
+Dietrich-generated large-coordinate strokes use the `float32,float32` point
+layout. The parser also accepts a `float64,float64` layout when the geometry
+block size matches it.
+
 Layout after `pointCount`:
 
 | Field | Size |
 | :--- | :--- |
-| repeated points as `float64,float64` | `16 * pointCount` bytes |
+| repeated points as `float32,float32` or `float64,float64` | `8 * pointCount` or `16 * pointCount` bytes |
 | pressures as `float32` | `4 * pointCount` bytes |
 | timestamps as `int32` | `4 * pointCount` bytes |
 | optional tilts as `float32` | `4 * pointCount` bytes |
@@ -782,7 +882,7 @@ hashed_bytes = data[:-58]
 Still not fully decoded:
 
 1. The `.spi` payload-to-raster encoding and when it is required instead of direct PDF rasterization
-2. The full meaning of all object subrecord fields outside the already-decoded stroke/image pieces
+2. The full meaning of all object subrecord fields outside the already-decoded stroke/image/text-field fields
 3. The detailed optional fields inside image objects when crop/original-image/border data is present
 4. The opaque 32-byte stroke-style tail
 5. The exact stroke material and dynamic-width rendering algorithm
@@ -813,4 +913,37 @@ These rules are reliable:
 11. Parse `customObjectList` after the standard page-property payload and before the layer section when bit `0x40000` is set.
 12. Treat `canvasCacheDataMap.fileId` as an optional cache reference; it is not the authoritative PDF-page mapping.
 13. Do not assume the trailing image-own subrecord contains the displayed image id.
-14. Keep the handwriting parser logic as-is unless a specific unsupported pen/object type is found.
+14. Treat text-field objects (`object_type = 2`) as native positioned text when their shape/text subrecord has `shape_type = 4`.
+15. Treat image objects (`object_type = 3`) as native inserted images when their shape subrecord has a fill-image effect with an `imageId`.
+16. Do not assume frames require a dedicated Samsung object type; Dietrich writes them as a stroke outline plus a heading text field.
+17. Keep the handwriting parser logic as-is unless a specific unsupported pen/object type is found.
+
+---
+
+## 14. Dietrich Samsung Notes Writer Profile
+
+Dietrich-generated `.page` files use the same top-level sections described
+above:
+
+```text
+18-byte page header
+core page metadata
+optional page-property block
+layer/object section
+32-byte page digest
+Page for SAMSUNG S-Pen SDK
+```
+
+The writer currently emits one visible layer per page. Within that layer:
+
+- strokes and stroke-like shape outlines are object type `1`
+- text fields are object type `2`
+- images are object type `3`
+- frame outlines are object type `1`
+- frame headings are object type `2`
+
+The written page property mask includes the background color and page background
+width fields. The `drawnRect` property is written when visible content has
+bounds. Infinite canvases are materialized as finite pages sized to the content
+bounds plus margin. Very large pages are structurally valid, but Samsung Notes
+may be slow or refuse them depending on app/device limits.
