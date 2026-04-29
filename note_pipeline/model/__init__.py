@@ -92,6 +92,23 @@ class TextElement:
 
 
 @dataclass
+class FrameElement:
+    element_id: str
+    rect: Rect
+    name: Optional[str]
+    color_int: int
+    color_hex_argb: str
+    rgba: Tuple[float, float, float, float]
+    stroke_width: float
+    layer_number: int
+    source_order: int
+    z_index: int
+    label_font_size_pt: Optional[float] = None
+    child_element_ids: List[str] = field(default_factory=list)
+    vendor_extensions: Dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
 class PdfBackgroundElement:
     element_id: str
     rect: Rect
@@ -119,6 +136,7 @@ NoteElement = Union[
     StrokeElement,
     ImageElement,
     TextElement,
+    FrameElement,
     PdfBackgroundElement,
     UnsupportedElement,
 ]

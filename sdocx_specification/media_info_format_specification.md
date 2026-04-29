@@ -59,8 +59,8 @@ That filename convention is useful, but parsers should still trust the explicit
 
 ### `fileHash`
 
-`fileHash` is stored as 64 ASCII hex characters. The exact hash algorithm is not
-yet fully named, so this field should currently be treated as opaque metadata.
+`fileHash` is stored as 64 ASCII hex characters. Dietrich-generated entries use
+the SHA-256 hex digest of the corresponding media file bytes.
 
 ### `extraBytes`
 
@@ -74,6 +74,22 @@ Known file types referenced through `mediaInfo.dat`:
 - PDF background files
 - inserted image files
 - `.spi` painting/cache files; see [`spi_format_specification.md`](spi_format_specification.md)
+
+## 5.1 Writer Behavior
+
+Dietrich writes `formatVersion = 5304`, one entry per exported image asset, and
+the `EOFX` footer. Generated media filenames use:
+
+```text
+<bind-id>@<sanitized-filename>
+```
+
+If the source filename has no extension, Dietrich chooses an extension from the
+asset media type. Generated entries use:
+
+- `refCount = 1`
+- `isFileAttached = 1`
+- `fileHash = sha256(media bytes)` as 64 lowercase ASCII hex characters
 
 ## 6. Resolution Rule
 

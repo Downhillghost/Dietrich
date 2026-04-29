@@ -81,7 +81,24 @@ The payload ends with the ASCII marker:
 Document for S-Pen SDK
 ```
 
-## 6. Practical Parsing Rules
+## 6. Dietrich Writer Pattern
+
+Dietrich-generated `end_tag.bin` files use:
+
+- `formatVersion = 4000`
+- empty note id, cover image, title, app patch name, owner id, fixed font, and
+  app custom data
+- `noteWidth = max(page widths)`
+- `noteHeight = sum(page heights) + 8`
+- thumbnail width/height `-1`
+- `minFormatVersion = 4000`
+- last viewed page index `0`
+- fixed text direction `2`
+- fixed background theme `2`
+- server checkpoint `-1`
+- footer marker `Document for S-Pen SDK`
+
+## 7. Practical Parsing Rules
 
 These rules are reliable:
 

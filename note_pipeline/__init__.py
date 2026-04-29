@@ -1,6 +1,7 @@
 from .model import (
     Asset,
     ExportResult,
+    FrameElement,
     NoteCanvas,
     ImageElement,
     NoteBackground,
@@ -22,6 +23,7 @@ def export_note_source(*args, **kwargs):
 __all__ = [
     "Asset",
     "ExportResult",
+    "FrameElement",
     "ImageElement",
     "NoteCanvas",
     "NoteBackground",

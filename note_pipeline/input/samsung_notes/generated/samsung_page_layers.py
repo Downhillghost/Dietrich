@@ -221,9 +221,9 @@ class SamsungPageLayers(KaitaiStruct):
             pass
 
 
-    class ShapeImageSubrecord(KaitaiStruct):
+    class ShapeSubrecord(KaitaiStruct):
         def __init__(self, _io, _parent=None, _root=None):
-            super(SamsungPageLayers.ShapeImageSubrecord, self).__init__(_io)
+            super(SamsungPageLayers.ShapeSubrecord, self).__init__(_io)
             self._parent = _parent
             self._root = _root
             self._read()
@@ -240,6 +240,58 @@ class SamsungPageLayers(KaitaiStruct):
         def _fetch_instances(self):
             pass
             self.original_rect._fetch_instances()
+            _ = self.text_common
+            if hasattr(self, '_m_text_common'):
+                pass
+
+            _ = self.text_common_size
+            if hasattr(self, '_m_text_common_size'):
+                pass
+
+
+        @property
+        def has_text_common(self):
+            if hasattr(self, '_m_has_text_common'):
+                return self._m_has_text_common
+
+            self._m_has_text_common =  ((self.shape_type == 4) and (self.shape_property_mask & 1 != 0) and (self.text_common_size_offset >= 0) and (self.text_common_size_offset + 4 <= self._io.size()))
+            return getattr(self, '_m_has_text_common', None)
+
+        @property
+        def text_common(self):
+            if hasattr(self, '_m_text_common'):
+                return self._m_text_common
+
+            if  ((self.has_text_common) and (self.text_common_size <= (self._io.size() - self.text_common_size_offset) - 4)) :
+                pass
+                _pos = self._io.pos()
+                self._io.seek(self.text_common_size_offset + 4)
+                self._m_text_common = self._io.read_bytes(self.text_common_size)
+                self._io.seek(_pos)
+
+            return getattr(self, '_m_text_common', None)
+
+        @property
+        def text_common_size(self):
+            if hasattr(self, '_m_text_common_size'):
+                return self._m_text_common_size
+
+            if self.has_text_common:
+                pass
+                _pos = self._io.pos()
+                self._io.seek(self.text_common_size_offset)
+                self._m_text_common_size = self._io.read_u4le()
+                self._io.seek(_pos)
+
+            return getattr(self, '_m_text_common_size', None)
+
+        @property
+        def text_common_size_offset(self):
+            if hasattr(self, '_m_text_common_size_offset'):
+                return self._m_text_common_size_offset
+
+            self._m_text_common_size_offset = self.own_offset - 6
+            return getattr(self, '_m_text_common_size_offset', None)
 
 
     class StrokeSubrecord(KaitaiStruct):
@@ -293,7 +345,7 @@ class SamsungPageLayers(KaitaiStruct):
                 pass
                 self._raw_body = self._io.read_bytes(self.size - 6)
                 _io__raw_body = KaitaiStream(BytesIO(self._raw_body))
-                self.body = SamsungPageLayers.ShapeImageSubrecord(_io__raw_body, self, self._root)
+                self.body = SamsungPageLayers.ShapeSubrecord(_io__raw_body, self, self._root)
             else:
                 pass
                 self.body = self._io.read_bytes(self.size - 6)

@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Dict, Optional, Type
 
 from note_pipeline.input.base import NoteImporter
+from note_pipeline.input.excalidraw import ExcalidrawImporter
 from note_pipeline.input.samsung_notes import SamsungNotesImporter
 
 
 IMPORTERS: Dict[str, Type[NoteImporter]] = {
+    "excalidraw": ExcalidrawImporter,
     "samsung_notes": SamsungNotesImporter,
 }
 

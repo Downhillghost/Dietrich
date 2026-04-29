@@ -34,7 +34,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--format",
-        choices=("png", "excalidraw"),
+        choices=("png", "excalidraw", "sdocx"),
         default="png",
         help="Output format to export. Defaults to png.",
     )

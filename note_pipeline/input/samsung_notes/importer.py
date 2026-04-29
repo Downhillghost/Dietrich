@@ -101,6 +101,7 @@ class SamsungNotesImporter(NoteImporter):
                     "background_records": page_parser.extract_background_records(),
                     "stroke_records": page_parser.extract_stroke_records(),
                     "image_records": page_parser.extract_image_records(),
+                    "text_field_records": page_parser.extract_text_field_records(),
                 }
             )
 
@@ -312,6 +313,39 @@ class SamsungNotesImporter(NoteImporter):
                     strikethrough=bool(segment.get("strikethrough")),
                     background_color_int=int(segment["background_color_int"]) if isinstance(segment.get("background_color_int"), int) else None,
                     vendor_extensions={"samsung_notes": dict(segment)},
+                )
+            )
+
+        for text_field_index, record in enumerate(list(page_record["text_field_records"])):
+            text = str(record.get("text") or "")
+            rect = record.get("rect")
+            if not text or not isinstance(rect, tuple) or len(rect) != 4:
+                continue
+            margins = record.get("margins")
+            if not isinstance(margins, tuple) or len(margins) != 4:
+                margins = (0.0, 0.0, 0.0, 0.0)
+            font_size = float(record.get("font_size") or 17.0)
+            ascent = font_size * 0.8
+            descent = font_size * 0.25
+            x = float(rect[0]) + float(margins[0])
+            top = float(rect[1]) + float(margins[1])
+            width = max(1.0, float(rect[2]) - float(rect[0]) - float(margins[0]) - float(margins[2]))
+            page.elements.append(
+                TextElement(
+                    element_id=f"text-field-{_stable_id(page_id, text_field_index, text, record.get('object_start'))}",
+                    text=text,
+                    x=x,
+                    baseline_y=top + ascent,
+                    width=width,
+                    ascent=ascent,
+                    descent=descent,
+                    color_int=int(record.get("color_int") or DEFAULT_TEXT_COLOR),
+                    layer_number=int(record.get("layer_number") or 0),
+                    source_order=text_field_index,
+                    z_index=350000 + text_field_index,
+                    font_size_pt=font_size,
+                    font_name=None,
+                    vendor_extensions={"samsung_notes": dict(record)},
                 )
             )
 

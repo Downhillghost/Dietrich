@@ -16,18 +16,48 @@ exports that model to other formats.
 
 Supported today:
 
-- `.sdocx` files and already extracted Samsung Notes folders
-- page dimensions and note metadata
-- PDF page backgrounds
-- inserted images
-- handwriting strokes, including per-point pressure and timing metadata
-- keyboard text with rich-text spans
-- `.spi` media metadata preservation
-- PNG page export
-- Excalidraw scene export
+Samsung Notes input:
 
-Unknown Samsung-specific structures are preserved where possible instead of
-being silently discarded.
+- `.sdocx` files and already extracted Samsung Notes folders
+- page dimensions, page order, note metadata, background color, and note summary
+  sidecars
+- handwriting strokes, including per-point pressure and timing metadata
+- keyboard body text with rich-text spans
+- native Samsung Notes text fields
+- inserted images and PDF page backgrounds
+- media tables and `.spi` media metadata preservation
+
+Samsung Notes output:
+
+- `.sdocx` export for neutral pages and Excalidraw infinite-canvas materialized
+  as a finite page
+- handwriting strokes and stroke-like shape outlines
+- native Samsung Notes text-field objects for neutral text elements
+- native Samsung Notes image objects for resolved image assets
+- frame outlines with positioned heading text fields
+
+Excalidraw input:
+
+- `.excalidraw` JSON files
+- Obsidian Excalidraw `.excalidraw.md` files with drawing blocks
+- freedraw, lines, arrows, rectangles, diamonds, ellipses, images, text, and
+  frames
+- image assets embedded in the scene or referenced from nearby markdown assets
+- frame-child grouping in the neutral model
+
+Excalidraw output:
+
+- `.excalidraw` scene export from the neutral model
+- handwriting strokes, images, text, and frames
+- frame child assignment when neutral frame relationships are available
+
+PNG output:
+
+- rendered note pages or materialized canvases
+- Samsung Notes PDF backgrounds, images, strokes, shapes, and text elements
+
+Target-specific structures are preserved where possible instead of being
+silently discarded.
 
 ## Why A Neutral Model?
 
@@ -37,11 +67,12 @@ Dietrich is intentionally built as:
 input format -> neutral note model -> output format
 ```
 
-Samsung Notes is the first supported input format, but the code is organized so
-other note formats can be added later without rewriting the exporters. A future
-OneNote, GoodNotes, Xournal++, or other importer should only need to convert its
-source format into the same internal model. PNG, Excalidraw, and future
-exporters can then consume that model without knowing where the note came from.
+Samsung Notes and Excalidraw are both supported input formats, and the code is
+organized so other note formats can be added later without rewriting the
+exporters. A future OneNote, GoodNotes, Xournal++, or other importer should only
+need to convert its source format into the same internal model. PNG,
+Excalidraw, Samsung Notes, and future exporters can then consume that model
+without knowing where the note came from.
 
 The main layers are:
 
@@ -56,9 +87,11 @@ code consumes only the neutral model.
 
 Input format detection is handled by the importer registry in
 `note_pipeline/input/registry.py`. Each importer implements `supports_path()`.
-The Samsung Notes importer currently accepts `.sdocx` files and extracted
-folders that look like Samsung Notes packages. Future importers can use file
-extensions, container signatures, folder structure, or any other reliable check.
+The Samsung Notes importer accepts `.sdocx` files and extracted folders that
+look like Samsung Notes packages. The Excalidraw importer accepts raw
+`.excalidraw` JSON files and Obsidian `.excalidraw.md` files with drawing
+blocks. Future importers can use file extensions, container signatures, folder
+structure, or any other reliable check.
 
 ## Install
 
@@ -106,6 +139,28 @@ You can also pass an already extracted Samsung Notes folder instead of a
 python dietrich.py path\to\extracted_note_folder --format png
 ```
 
+Export Excalidraw content to Samsung Notes:
+
+```powershell
+python dietrich.py path\to\scene.excalidraw --format sdocx --output-dir samsung_export
+```
+
+For Excalidraw files, including Obsidian Excalidraw markdown files with
+`compressed-json` drawing blocks, Dietrich materializes the infinite canvas as
+one finite Samsung Notes page sized to the content bounds plus margin.
+Excalidraw frames remain frame elements in the neutral model; Samsung Notes
+export renders them as an outline plus a positioned heading text field above the
+frame. Very large canvases are written structurally, but Samsung Notes may
+become slow or reject them depending on the device/app version.
+
+Handwriting and common Excalidraw shapes are written as Samsung stroke objects.
+Lines and arrows are densified into stroke paths, with arrow heads written as
+additional strokes. Excalidraw text is written as positioned Samsung Notes text
+field objects with Samsung-specific minimum dimensions and vertical padding.
+Resolvable Excalidraw images are written as native Samsung image objects and
+registered in `media/mediaInfo.dat`. The `.sdocx` exporter writes the document
+end tag and appends the trailing blank page used for import compatibility.
+
 Show all CLI options:
 
 ```powershell
@@ -114,10 +169,11 @@ python dietrich.py --help
 
 ### Text Scale
 
-`--text-scale` controls how Samsung Notes keyboard text is materialized onto
-pages. It multiplies the reconstructed font size, line height, line wrapping,
-and indentation used for typed text. It does not affect handwriting strokes,
-images, PDF backgrounds, or PNG output resolution.
+`--text-scale` controls how Samsung Notes keyboard body text is materialized
+onto pages. It multiplies the reconstructed font size, line height, line
+wrapping, and indentation used for that typed-text layout. It does not affect
+handwriting strokes, images, PDF backgrounds, native Samsung Notes text-field
+objects, Excalidraw text elements, or PNG output resolution.
 
 By default, Dietrich does not use a fixed number. If `--text-scale` is omitted,
 the Samsung Notes importer auto-estimates the value from the note metadata:
@@ -126,6 +182,8 @@ the Samsung Notes importer auto-estimates the value from the note metadata:
 - width `961`: uses about `3.2`
 - width `1080`: uses about `2.19`
 - widths between those families are interpolated
+- widths below or above those families are scaled from the nearest family and
+  clamped to the supported range `0.5` through `8.0`
 - missing or unsupported metadata falls back to `1.0`
 
 These presets are empirical and are not strictly monotonic: different Samsung
@@ -169,10 +227,12 @@ Generated parser files are committed so users do not need the compiler.
 
 ## Status
 
-Dietrich is useful, but the Samsung Notes format is not fully documented. Some
-fields are still partially understood, especially stroke rendering
-details and parts of `.spi` image payloads. The parser keeps unknown data where
-possible so support can improve without throwing information away.
+Dietrich currently covers the main note structures needed for practical
+conversion between Samsung Notes, Excalidraw, and PNG: page metadata, strokes,
+native text fields, images, PDF backgrounds for rendering, frames, media tables,
+page ordering, note summaries, and end-tag data. Some vendor-specific payloads,
+especially `.spi` painting/cache payloads and exact pen-material rendering, are
+preserved as structured metadata until they have a stable cross-format mapping.
 
 ## Contributing
 
