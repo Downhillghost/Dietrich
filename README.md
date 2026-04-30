@@ -251,7 +251,7 @@ images unless they are intentionally part of the public documentation set.
 ## License And Legal
 
 Samsung Notes and S Pen are trademarks of Samsung. This project is independent
-and is not affiliated with or endorsed by Samsung.
+and is not affiliated with or endorsed by Samsung. Dietrich was developed independently as a student university project to explore format interoperability.
 
 Dietrich is intended for interoperability with notes you are allowed to access.
 It is not intended to bypass encryption, authentication, or access controls.
